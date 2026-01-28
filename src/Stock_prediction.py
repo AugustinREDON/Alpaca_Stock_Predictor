@@ -1,8 +1,12 @@
 # Import necessary libraries
+
+import datetime
 import os
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
+
+from datetime import datetime, timezone
 
 from dotenv import load_dotenv
 
@@ -28,9 +32,10 @@ def main():
         )
 
     # Stock and date range
-    SYMBOL = "SPY"
+    SYMBOL = (input("Enter stock symbol to predict (default: SPY): ") or "SPY").upper()
     START_DATE = "2022-01-01"
-    END_DATE = "2026-01-22"
+    #START_DATE = input("Enter start date (YYYY-MM-DD, default: all available): ").strip() or "1900-01-01"
+    END_DATE = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
     # Pull daily bars from Alpaca
     client = StockHistoricalDataClient(API_KEY, API_SECRET)
@@ -99,12 +104,16 @@ def main():
     plt.ylabel("Price")
     plt.legend()
     plt.tight_layout()
-    plt.show()
 
     # Next-day prediction from latest row
     latest_data = X.iloc[-1].values
     next_close = model.predict([latest_data])[0]
     print(f"Next Day Predicted Close for {SYMBOL}: ${next_close:.2f}")
+
+
+    plt.show()
+
+
 
 
 if __name__ == "__main__":

@@ -1,4 +1,4 @@
-# SPY Next-Day Price Predictor (Alpaca + Random Forest)
+# Next-Day Price Predictor (Alpaca + Random Forest)
 
 A small end-to-end Python project that pulls historical daily data for the stock of yoru choice from the **Alpaca Market Data API**, engineers basic technical features (returns, rolling volatility, moving averages), trains a **RandomForestRegressor**, and predicts the **next trading day’s closing price**. The script reports **Mean Absolute Error (MAE)** on a holdout period and plots **actual vs. predicted** prices.
 
