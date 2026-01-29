@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 
 from dotenv import load_dotenv
 
+from alpaca.data.enums import DataFeed
 from alpaca.data.historical import StockHistoricalDataClient
 from alpaca.data.requests import StockBarsRequest
 from alpaca.data.timeframe import TimeFrame
@@ -23,6 +24,8 @@ def main():
     # Load environment variables from .env
     load_dotenv()
 
+    # ================== API Call ======================
+
     API_KEY = os.getenv("ALPACA_API_KEY")
     API_SECRET = os.getenv("ALPACA_API_SECRET")
 
@@ -30,6 +33,7 @@ def main():
         raise ValueError(
             "Missing Alpaca credentials. Ensure .env has your ALPACA_API_KEY and ALPACA_API_SECRET."
         )
+
 
     # Stock and date range
     SYMBOL = (input("Enter stock symbol to predict (default: SPY): ") or "SPY").upper()
@@ -45,7 +49,10 @@ def main():
         timeframe=TimeFrame.Day,
         start=START_DATE,
         end=END_DATE,
+        feed=DataFeed.IEX
     )
+
+    # ================ Data Specifications ===================
 
     bars = client.get_stock_bars(request_params)
 
@@ -59,6 +66,7 @@ def main():
     # Ensure chronological order
     if "timestamp" in df.columns:
         df = df.sort_values("timestamp")
+
 
     # Feature engineering
     df["return"] = df["close"].pct_change() #daily return (closetoday - closeyesterday)/closeyesterday
@@ -77,6 +85,7 @@ def main():
     # Drop rows made invalid by rolling windows / shift
     df = df.dropna()
 
+    #what to pass in model
     features = ["volume", "volatility", "ma_5_ratio", "ma_10_ratio", "ma_20_ratio"]
     X = df[features]
     y = df["target_return"]
@@ -94,12 +103,16 @@ def main():
     )
     model.fit(X_train, y_train)
 
+    # Original Code -------------------
     # Evaluate
     # preds = model.predict(X_test)
     # mae = mean_absolute_error(y_test, preds)
     # print(f"Mean Absolute Error: ${mae:.2f}")
+    # -----------------------------------------
 
-    # same as OG code
+    # ================ Prediction Display Math ==================
+
+    # gets prediction
     pred_returns = model.predict(X_test)
 
     #this would be the calculated verison of the real date (not acurate)
@@ -108,19 +121,24 @@ def main():
     #this pulls the real data from df
     actual_future_prices = df.loc[y_test.index, "next_close"]
 
-    #base prcice to numeric to calucalte next price
+    #base price to numeric to calculate next price
     base_prices = df.loc[y_test.index, "close"]
+
     #predicted price turned from mlutiplying real base of day before * predicted returns.
     predicted_future_prices = base_prices * (1 + pred_returns)
 
+    #data printing
     mae = mean_absolute_error(actual_future_prices, predicted_future_prices)
     print(f"Mean Absolute Error: ${mae:.2f}")
 
     # 5. Plot the Prices
     plt.figure(figsize=(12, 6))
 
+    #pick your plot range
     #days_to_plot = len(y_test)
     days_to_plot = 10
+
+    # ============== Plotting =====================
 
     plt.plot(y_test.tail(days_to_plot).index,
              actual_future_prices.tail(days_to_plot).values,
@@ -137,6 +155,7 @@ def main():
     plt.grid(True, alpha=0.3)
     plt.tight_layout()
 
+    # ================ Math Returns ========================
 
     latest_data_df = X.iloc[[-1]]
 
@@ -144,6 +163,8 @@ def main():
 
     current_price = df["close"].iloc[-1]
     next_price = current_price * (1 + next_return)
+
+    # ================ Print Returns ========================
 
     print("------------------------------------------------")
     print(f"Latest Close ({df['timestamp'].iloc[-1].date()}): ${current_price:.2f}")
