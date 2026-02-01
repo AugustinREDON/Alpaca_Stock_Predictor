@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 
 from dotenv import load_dotenv
 
+from alpaca.data.enums import DataFeed
 from alpaca.data.historical import StockHistoricalDataClient
 from alpaca.data.requests import StockBarsRequest
 from alpaca.data.timeframe import TimeFrame
@@ -23,6 +24,8 @@ def main():
     # Load environment variables from .env
     load_dotenv()
 
+    # ================== API Call ======================
+
     API_KEY = os.getenv("ALPACA_API_KEY")
     API_SECRET = os.getenv("ALPACA_API_SECRET")
 
@@ -30,6 +33,7 @@ def main():
         raise ValueError(
             "Missing Alpaca credentials. Ensure .env has your ALPACA_API_KEY and ALPACA_API_SECRET."
         )
+
 
     # Stock and date range
     SYMBOL = (input("Enter stock symbol to predict (default: SPY): ") or "SPY").upper()
@@ -45,7 +49,10 @@ def main():
         timeframe=TimeFrame.Day,
         start=START_DATE,
         end=END_DATE,
+        feed=DataFeed.IEX
     )
+
+    # ================ Data Specifications ===================
 
     bars = client.get_stock_bars(request_params)
 
@@ -60,22 +67,28 @@ def main():
     if "timestamp" in df.columns:
         df = df.sort_values("timestamp")
 
+
     # Feature engineering
     df["return"] = df["close"].pct_change() #daily return (closetoday - closeyesterday)/closeyesterday
+    df["next_close"] = df["close"].shift(-1)
     df["volatility"] = df["return"].rolling(5).std()  #5-day rolling stddev of returns
-    df["ma_5"] = df["close"].rolling(5).mean() 
-    df["ma_10"] = df["close"].rolling(10).mean()
-    df["ma_20"] = df["close"].rolling(20).mean()
+
+    # 3. Moving Averages (Relative distance instead of raw price)
+    df["ma_5_ratio"] = df["close"] / df["close"].rolling(5).mean() - 1
+    df["ma_10_ratio"] = df["close"] / df["close"].rolling(10).mean() - 1
+    df["ma_20_ratio"] = df["close"] / df["close"].rolling(20).mean() - 1
 
     # Target: next day's close
-    df["target"] = df["close"].shift(-1)
+    #df["target"] = df["close"].shift(-1)
+    df["target_return"] = df["return"].shift(-1)
 
     # Drop rows made invalid by rolling windows / shift
     df = df.dropna()
 
-    features = ["close", "volume", "volatility", "ma_5", "ma_10", "ma_20"]
+    #what to pass in model
+    features = ["volume", "volatility", "ma_5_ratio", "ma_10_ratio", "ma_20_ratio"]
     X = df[features]
-    y = df["target"]
+    y = df["target_return"]
 
     # Train/test split (shuffle=False because time series)
     X_train, X_test, y_train, y_test = train_test_split(
@@ -90,25 +103,74 @@ def main():
     )
     model.fit(X_train, y_train)
 
+    # Original Code -------------------
     # Evaluate
-    preds = model.predict(X_test)
-    mae = mean_absolute_error(y_test, preds)
+    # preds = model.predict(X_test)
+    # mae = mean_absolute_error(y_test, preds)
+    # print(f"Mean Absolute Error: ${mae:.2f}")
+    # -----------------------------------------
+
+    # ================ Prediction Display Math ==================
+
+    # gets prediction
+    pred_returns = model.predict(X_test)
+
+    #this would be the calculated verison of the real date (not acurate)
+    #actual_future_prices = base_prices * (1 + y_test)
+
+    #this pulls the real data from df
+    actual_future_prices = df.loc[y_test.index, "next_close"]
+
+    #base price to numeric to calculate next price
+    base_prices = df.loc[y_test.index, "close"]
+
+    #predicted price turned from mlutiplying real base of day before * predicted returns.
+    predicted_future_prices = base_prices * (1 + pred_returns)
+
+    #data printing
+    mae = mean_absolute_error(actual_future_prices, predicted_future_prices)
     print(f"Mean Absolute Error: ${mae:.2f}")
 
-    # Plot actual vs predicted
-    plt.figure(figsize=(10, 5))
-    plt.plot(y_test.values, label="Actual Price")
-    plt.plot(preds, label="Predicted Price")
-    plt.title(f"{SYMBOL} Price Prediction")
-    plt.xlabel("Time")
-    plt.ylabel("Price")
+    # 5. Plot the Prices
+    plt.figure(figsize=(12, 6))
+
+    #pick your plot range
+    #days_to_plot = len(y_test)
+    days_to_plot = 10
+
+    # ============== Plotting =====================
+
+    plt.plot(y_test.tail(days_to_plot).index,
+             actual_future_prices.tail(days_to_plot).values,
+             label="Actual Price", color='blue', alpha=0.6)
+
+    plt.plot(predicted_future_prices.tail(days_to_plot).index,
+             predicted_future_prices.tail(days_to_plot).values,
+             label="Predicted Price", color='orange', linestyle='--')
+
+    plt.title(f"{SYMBOL} Price Prediction (Reconstructed from Returns)")
+    plt.xlabel("Date")
+    plt.ylabel("Price ($)")
     plt.legend()
+    plt.grid(True, alpha=0.3)
     plt.tight_layout()
 
-    # Next-day prediction from latest row
-    latest_data = X.iloc[-1].values
-    next_close = model.predict([latest_data])[0]
-    print(f"Next Day Predicted Close for {SYMBOL}: ${next_close:.2f}")
+    # ================ Math Returns ========================
+
+    latest_data_df = X.iloc[[-1]]
+
+    next_return = model.predict(latest_data_df)[0]
+
+    current_price = df["close"].iloc[-1]
+    next_price = current_price * (1 + next_return)
+
+    # ================ Print Returns ========================
+
+    print("------------------------------------------------")
+    print(f"Latest Close ({df['timestamp'].iloc[-1].date()}): ${current_price:.2f}")
+    print(f"Model Predicts Return: {next_return * 100:+.2f}%")
+    print(f"Model Predicts Price:  ${next_price:.2f}")
+    print("------------------------------------------------")
 
 
     plt.show()
